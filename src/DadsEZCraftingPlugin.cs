@@ -12,7 +12,7 @@ namespace DadsEZCrafting
     {
         public const string PluginGuid = "com.dadisbored.dadsezcrafting";
         public const string PluginName = "DadsEZCrafting";
-        public const string PluginVersion = "0.1.0";
+        public const string PluginVersion = "1.0.0";
 
         internal static ConfigEntry<bool> Enabled;
         internal static ConfigEntry<string> BlackForestHints;

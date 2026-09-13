@@ -13,6 +13,11 @@ namespace DadsEZCrafting
         private const float ToolbarHeight = 92f;
         private const int MaximumCraftQuantity = 9999;
         private static readonly MethodInfo UpdateCraftingPanelMethod = AccessTools.Method(typeof(InventoryGui), "UpdateCraftingPanel", new[] { typeof(bool) });
+        private static readonly FieldInfo SelectedRecipeField = AccessTools.Field(typeof(InventoryGui), "m_selectedRecipe");
+        private static readonly FieldInfo MultiCraftAmountField = AccessTools.Field(typeof(InventoryGui), "m_multiCraftAmount");
+        private static readonly FieldInfo TouchMultiCraftingField = AccessTools.Field(typeof(InventoryGui), "m_touchMultiCrafting");
+        private static readonly FieldInfo SelectedRecipeValueField = AccessTools.Field(SelectedRecipeField.FieldType, "<Recipe>k__BackingField");
+        private static readonly FieldInfo SelectedItemDataValueField = AccessTools.Field(SelectedRecipeField.FieldType, "<ItemData>k__BackingField");
 
         internal static CraftingUiManager Instance { get; private set; }
 
@@ -55,9 +60,9 @@ namespace DadsEZCrafting
         internal static void PrepareCrafting(InventoryGui gui)
         {
             if (Instance == null || gui != Instance._gui) return;
-            bool canMultiCraft = Instance._craftQuantity > 1 && gui.m_selectedRecipe.ItemData == null;
-            gui.m_multiCraftAmount = canMultiCraft ? Instance._craftQuantity : 1;
-            gui.m_touchMultiCrafting = canMultiCraft;
+            bool canMultiCraft = Instance._craftQuantity > 1 && GetSelectedItemData(gui) == null;
+            MultiCraftAmountField.SetValue(gui, canMultiCraft ? Instance._craftQuantity : 1);
+            TouchMultiCraftingField.SetValue(gui, canMultiCraft);
         }
 
         private void Initialize(InventoryGui gui)
@@ -192,8 +197,8 @@ namespace DadsEZCrafting
             SetSlice(_maxButton.GetComponent<RectTransform>(), 0.61f, 1f, 1f, 0f);
             _maxButton.onClick.AddListener(SetMaximumQuantity);
 
-            _lastSelectedRecipe = _gui.m_selectedRecipe.Recipe;
-            _lastUpgradeItem = _gui.m_selectedRecipe.ItemData;
+            _lastSelectedRecipe = GetSelectedRecipe(_gui);
+            _lastUpgradeItem = GetSelectedItemData(_gui);
             RefreshQuantityControls();
         }
 
@@ -263,20 +268,22 @@ namespace DadsEZCrafting
 
         private TextMeshProUGUI CreateInputText(Transform parent, string name, Color color)
         {
-            GameObject root = new GameObject(name, typeof(RectTransform), typeof(TextMeshProUGUI));
+            GameObject root = new GameObject(name, typeof(RectTransform));
+            root.SetActive(false);
             root.transform.SetParent(parent, false);
             RectTransform rect = (RectTransform)root.transform;
             rect.anchorMin = Vector2.zero;
             rect.anchorMax = Vector2.one;
             rect.offsetMin = Vector2.zero;
             rect.offsetMax = Vector2.zero;
-            TextMeshProUGUI text = root.GetComponent<TextMeshProUGUI>();
+            TextMeshProUGUI text = root.AddComponent<TextMeshProUGUI>();
             text.font = _gui.m_recipeName.font;
             text.fontSize = 15f;
             text.color = color;
             text.alignment = TextAlignmentOptions.MidlineLeft;
             text.textWrappingMode = TextWrappingModes.NoWrap;
             text.raycastTarget = false;
+            root.SetActive(true);
             return text;
         }
 
@@ -319,8 +326,8 @@ namespace DadsEZCrafting
         private void Update()
         {
             if (_gui == null) return;
-            Recipe selectedRecipe = _gui.m_selectedRecipe.Recipe;
-            ItemDrop.ItemData selectedUpgrade = _gui.m_selectedRecipe.ItemData;
+            Recipe selectedRecipe = GetSelectedRecipe(_gui);
+            ItemDrop.ItemData selectedUpgrade = GetSelectedItemData(_gui);
             if (selectedRecipe != _lastSelectedRecipe || selectedUpgrade != _lastUpgradeItem)
             {
                 _lastSelectedRecipe = selectedRecipe;
@@ -352,7 +359,7 @@ namespace DadsEZCrafting
         {
             if (!CanSelectQuantity()) return;
             Player player = Player.m_localPlayer;
-            Recipe recipe = _gui.m_selectedRecipe.Recipe;
+            Recipe recipe = GetSelectedRecipe(_gui);
             int quality = 1;
             int low = 0;
             int high = 1;
@@ -376,7 +383,7 @@ namespace DadsEZCrafting
 
         private bool CanSelectQuantity()
         {
-            return _gui != null && Player.m_localPlayer != null && _gui.m_selectedRecipe.Recipe != null && _gui.m_selectedRecipe.ItemData == null;
+            return _gui != null && Player.m_localPlayer != null && GetSelectedRecipe(_gui) != null && GetSelectedItemData(_gui) == null;
         }
 
         private void RefreshQuantityControls()
@@ -392,6 +399,23 @@ namespace DadsEZCrafting
         private static int ModifierStep()
         {
             return Input.GetKey(KeyCode.LeftControl) ? 10 : 1;
+        }
+
+        private static object GetSelectedPair(InventoryGui gui)
+        {
+            return gui == null ? null : SelectedRecipeField.GetValue(gui);
+        }
+
+        private static Recipe GetSelectedRecipe(InventoryGui gui)
+        {
+            object pair = GetSelectedPair(gui);
+            return pair == null ? null : SelectedRecipeValueField.GetValue(pair) as Recipe;
+        }
+
+        private static ItemDrop.ItemData GetSelectedItemData(InventoryGui gui)
+        {
+            object pair = GetSelectedPair(gui);
+            return pair == null ? null : SelectedItemDataValueField.GetValue(pair) as ItemDrop.ItemData;
         }
 
         private void ToggleMenu(GameObject menu, GameObject other)

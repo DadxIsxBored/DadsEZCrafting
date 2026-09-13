@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0
+## 1.0.0
 
 - Added native crafting-list search.
 - Added item-type filters with All selected by default.

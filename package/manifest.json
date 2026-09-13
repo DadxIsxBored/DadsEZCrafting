@@ -1,6 +1,6 @@
 {
   "name": "DadsEZCrafting",
-  "version_number": "0.1.0",
+  "version_number": "1.0.0",
   "website_url": "https://github.com/DadxIsxBored/DadsEZCrafting",
   "description": "Native crafting search, category and biome dropdowns, food-stat sorting, and mass crafting for Valheim 1.0.12.",
   "dependencies": [
