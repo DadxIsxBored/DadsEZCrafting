@@ -11,6 +11,7 @@ namespace DadsEZCrafting
         {
             Patch(harmony, AccessTools.Method(typeof(InventoryGui), "Awake"), nameof(InventoryGuiAwakePostfix), false);
             Patch(harmony, AccessTools.Method(typeof(InventoryGui), "UpdateRecipeList", new[] { typeof(List<Recipe>) }), nameof(UpdateRecipeListPrefix), true);
+            Patch(harmony, AccessTools.Method(typeof(InventoryGui), "OnCraftPressed"), nameof(OnCraftPressedPrefix), true);
         }
 
         private static void Patch(Harmony harmony, MethodBase original, string patchName, bool prefix)
@@ -36,6 +37,10 @@ namespace DadsEZCrafting
                 RecipeFilterState.Apply(recipes);
             }
         }
+
+        private static void OnCraftPressedPrefix(InventoryGui __instance)
+        {
+            CraftingUiManager.PrepareCrafting(__instance);
+        }
     }
 }
-

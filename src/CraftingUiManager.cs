@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
 using TMPro;
@@ -10,6 +11,7 @@ namespace DadsEZCrafting
     internal sealed class CraftingUiManager : MonoBehaviour
     {
         private const float ToolbarHeight = 92f;
+        private const int MaximumCraftQuantity = 9999;
         private static readonly MethodInfo UpdateCraftingPanelMethod = AccessTools.Method(typeof(InventoryGui), "UpdateCraftingPanel", new[] { typeof(bool) });
 
         internal static CraftingUiManager Instance { get; private set; }
@@ -25,6 +27,16 @@ namespace DadsEZCrafting
         private TMP_Text _categoryLabel;
         private TMP_Text _tierLabel;
         private TMP_Text _sortLabel;
+        private GameObject _categoryMenu;
+        private GameObject _tierMenu;
+        private RectTransform _craftControls;
+        private TMP_Text _quantityLabel;
+        private Button _minusButton;
+        private Button _plusButton;
+        private Button _maxButton;
+        private Recipe _lastSelectedRecipe;
+        private ItemDrop.ItemData _lastUpgradeItem;
+        private int _craftQuantity = 1;
 
         internal static void Attach(InventoryGui gui)
         {
@@ -40,12 +52,21 @@ namespace DadsEZCrafting
             UpdateCraftingPanelMethod.Invoke(Instance._gui, new object[] { false });
         }
 
+        internal static void PrepareCrafting(InventoryGui gui)
+        {
+            if (Instance == null || gui != Instance._gui) return;
+            bool canMultiCraft = Instance._craftQuantity > 1 && gui.m_selectedRecipe.ItemData == null;
+            gui.m_multiCraftAmount = canMultiCraft ? Instance._craftQuantity : 1;
+            gui.m_touchMultiCrafting = canMultiCraft;
+        }
+
         private void Initialize(InventoryGui gui)
         {
             if (_gui != null) return;
             _gui = gui;
             Instance = this;
             BuildToolbar();
+            BuildCraftControls();
             RefreshLabels();
         }
 
@@ -84,18 +105,14 @@ namespace DadsEZCrafting
             SetRow(_categoryButton.GetComponent<RectTransform>(), 0f, 0.5f, 32f, 28f, 0f, -2f);
             _categoryButton.onClick.AddListener(() =>
             {
-                RecipeFilterState.NextCategory();
-                RefreshLabels();
-                RefreshRecipes();
+                ToggleMenu(_categoryMenu, _tierMenu);
             });
 
             _tierButton = CreateNativeButton(_toolbar, "Tier", out _tierLabel);
             SetRow(_tierButton.GetComponent<RectTransform>(), 0.5f, 1f, 32f, 28f, 2f, 0f);
             _tierButton.onClick.AddListener(() =>
             {
-                RecipeFilterState.NextTier();
-                RefreshLabels();
-                RefreshRecipes();
+                ToggleMenu(_tierMenu, _categoryMenu);
             });
 
             _sortButton = CreateNativeButton(_toolbar, "Sort", out _sortLabel);
@@ -106,6 +123,111 @@ namespace DadsEZCrafting
                 RefreshLabels();
                 RefreshRecipes();
             });
+
+            _categoryMenu = CreateDropdownMenu(
+                _categoryButton,
+                "CategoryMenu",
+                Array.ConvertAll(RecipeFilterState.Categories, value => new DropdownChoice
+                {
+                    Label = CategoryLabel(value),
+                    Select = () =>
+                    {
+                        RecipeFilterState.SetCategory(value);
+                        CloseMenus();
+                        RefreshLabels();
+                        RefreshRecipes();
+                    }
+                }));
+
+            _tierMenu = CreateDropdownMenu(
+                _tierButton,
+                "TierMenu",
+                Array.ConvertAll(RecipeFilterState.Tiers, value => new DropdownChoice
+                {
+                    Label = TierLabel(value),
+                    Select = () =>
+                    {
+                        RecipeFilterState.SetTier(value);
+                        CloseMenus();
+                        RefreshLabels();
+                        RefreshRecipes();
+                    }
+                }));
+        }
+
+        private void BuildCraftControls()
+        {
+            RectTransform craftButtonRect = _gui.m_craftButton == null ? null : _gui.m_craftButton.GetComponent<RectTransform>();
+            if (craftButtonRect == null || craftButtonRect.parent == null) return;
+
+            GameObject controlsObject = new GameObject("DadsEZCrafting_CraftControls", typeof(RectTransform));
+            _craftControls = controlsObject.GetComponent<RectTransform>();
+            _craftControls.SetParent(craftButtonRect.parent, false);
+            _craftControls.SetSiblingIndex(craftButtonRect.GetSiblingIndex());
+            CopyRect(craftButtonRect, _craftControls);
+
+            craftButtonRect.SetParent(_craftControls, false);
+            SetSlice(craftButtonRect, 0.48f, 1f, 2f, 0f);
+
+            RectTransform selector = new GameObject("QuantitySelector", typeof(RectTransform)).GetComponent<RectTransform>();
+            selector.SetParent(_craftControls, false);
+            SetSlice(selector, 0f, 0.46f, 0f, -2f);
+
+            _minusButton = CreateNativeButton(selector, "QuantityMinus", out TMP_Text minusLabel);
+            minusLabel.text = "-";
+            SetSlice(_minusButton.GetComponent<RectTransform>(), 0f, 0.18f, 0f, -1f);
+            _minusButton.onClick.AddListener(() => ChangeQuantity(-ModifierStep()));
+
+            Button countButton = CreateNativeButton(selector, "Quantity", out _quantityLabel);
+            countButton.enabled = false;
+            SetSlice(countButton.GetComponent<RectTransform>(), 0.18f, 0.43f, 1f, -1f);
+
+            _plusButton = CreateNativeButton(selector, "QuantityPlus", out TMP_Text plusLabel);
+            plusLabel.text = "+";
+            SetSlice(_plusButton.GetComponent<RectTransform>(), 0.43f, 0.61f, 1f, -1f);
+            _plusButton.onClick.AddListener(() => ChangeQuantity(ModifierStep()));
+
+            _maxButton = CreateNativeButton(selector, "QuantityMax", out TMP_Text maxLabel);
+            maxLabel.text = "Max";
+            SetSlice(_maxButton.GetComponent<RectTransform>(), 0.61f, 1f, 1f, 0f);
+            _maxButton.onClick.AddListener(SetMaximumQuantity);
+
+            _lastSelectedRecipe = _gui.m_selectedRecipe.Recipe;
+            _lastUpgradeItem = _gui.m_selectedRecipe.ItemData;
+            RefreshQuantityControls();
+        }
+
+        private GameObject CreateDropdownMenu(Button owner, string name, IReadOnlyList<DropdownChoice> choices)
+        {
+            const float rowHeight = 27f;
+            GameObject root = new GameObject("DadsEZCrafting_" + name, typeof(RectTransform), typeof(Image));
+            RectTransform rect = root.GetComponent<RectTransform>();
+            rect.SetParent(owner.transform, false);
+            rect.anchorMin = new Vector2(0f, 0f);
+            rect.anchorMax = new Vector2(1f, 0f);
+            rect.pivot = new Vector2(0.5f, 1f);
+            rect.offsetMin = new Vector2(0f, -rowHeight * choices.Count);
+            rect.offsetMax = Vector2.zero;
+            Image background = root.GetComponent<Image>();
+            CopyNativeImage(_gui.m_craftButton.GetComponent<Image>(), background);
+            background.color = new Color(0.16f, 0.13f, 0.11f, 1f);
+
+            for (int index = 0; index < choices.Count; index++)
+            {
+                DropdownChoice choice = choices[index];
+                Button option = CreateNativeButton(rect, name + "_" + index, out TMP_Text label);
+                label.text = choice.Label;
+                RectTransform optionRect = option.GetComponent<RectTransform>();
+                optionRect.anchorMin = new Vector2(0f, 1f);
+                optionRect.anchorMax = new Vector2(1f, 1f);
+                optionRect.pivot = new Vector2(0.5f, 1f);
+                optionRect.offsetMin = new Vector2(2f, -rowHeight * (index + 1) + 1f);
+                optionRect.offsetMax = new Vector2(-2f, -rowHeight * index - 1f);
+                option.onClick.AddListener(() => choice.Select());
+            }
+
+            root.SetActive(false);
+            return root;
         }
 
         private TMP_InputField CreateSearchField(Transform parent)
@@ -184,14 +306,127 @@ namespace DadsEZCrafting
         private void RefreshLabels()
         {
             if (_categoryLabel == null) return;
-            _categoryLabel.text = "Type: " + RecipeFilterState.CategoryLabel();
-            _tierLabel.text = "Tier: " + RecipeFilterState.TierLabel();
+            _categoryLabel.text = "Type: " + RecipeFilterState.CategoryLabel() + "  v";
+            _tierLabel.text = "Tier: " + RecipeFilterState.TierLabel() + "  v";
             _sortLabel.text = "Sort: " + RecipeFilterState.SortLabel();
             Color native = Color.white;
             Color active = new Color(1f, 0.72f, 0.36f, 1f);
             _categoryLabel.color = RecipeFilterState.Category == RecipeCategory.All ? native : active;
             _tierLabel.color = RecipeFilterState.Tier == ProgressionTier.All ? native : active;
             _sortLabel.color = RecipeFilterState.Sort == RecipeSort.Native ? native : active;
+        }
+
+        private void Update()
+        {
+            if (_gui == null) return;
+            Recipe selectedRecipe = _gui.m_selectedRecipe.Recipe;
+            ItemDrop.ItemData selectedUpgrade = _gui.m_selectedRecipe.ItemData;
+            if (selectedRecipe != _lastSelectedRecipe || selectedUpgrade != _lastUpgradeItem)
+            {
+                _lastSelectedRecipe = selectedRecipe;
+                _lastUpgradeItem = selectedUpgrade;
+                _craftQuantity = 1;
+                RefreshQuantityControls();
+            }
+
+            PrepareCrafting(_gui);
+
+            if (Input.GetKeyDown(KeyCode.Escape)) CloseMenus();
+            if (Input.GetMouseButtonDown(0) && !PointerInside(_categoryButton) && !PointerInside(_tierButton) &&
+                !PointerInside(_categoryMenu == null ? null : _categoryMenu.transform) &&
+                !PointerInside(_tierMenu == null ? null : _tierMenu.transform))
+            {
+                CloseMenus();
+            }
+        }
+
+        private void ChangeQuantity(int delta)
+        {
+            if (!CanSelectQuantity()) return;
+            _craftQuantity = Mathf.Clamp(_craftQuantity + delta, 1, MaximumCraftQuantity);
+            RefreshQuantityControls();
+            RefreshRecipes();
+        }
+
+        private void SetMaximumQuantity()
+        {
+            if (!CanSelectQuantity()) return;
+            Player player = Player.m_localPlayer;
+            Recipe recipe = _gui.m_selectedRecipe.Recipe;
+            int quality = 1;
+            int low = 0;
+            int high = 1;
+            while (high < MaximumCraftQuantity && player.HaveRequirements(recipe, false, quality, high))
+            {
+                low = high;
+                high = Math.Min(MaximumCraftQuantity, high * 2);
+                if (high == low) break;
+            }
+            while (low + 1 < high)
+            {
+                int middle = low + (high - low) / 2;
+                if (player.HaveRequirements(recipe, false, quality, middle)) low = middle;
+                else high = middle;
+            }
+            if (high == MaximumCraftQuantity && player.HaveRequirements(recipe, false, quality, high)) low = high;
+            _craftQuantity = Mathf.Max(1, low);
+            RefreshQuantityControls();
+            RefreshRecipes();
+        }
+
+        private bool CanSelectQuantity()
+        {
+            return _gui != null && Player.m_localPlayer != null && _gui.m_selectedRecipe.Recipe != null && _gui.m_selectedRecipe.ItemData == null;
+        }
+
+        private void RefreshQuantityControls()
+        {
+            if (_quantityLabel == null) return;
+            bool available = CanSelectQuantity();
+            _quantityLabel.text = _craftQuantity.ToString();
+            _minusButton.interactable = available && _craftQuantity > 1;
+            _plusButton.interactable = available && _craftQuantity < MaximumCraftQuantity;
+            _maxButton.interactable = available;
+        }
+
+        private static int ModifierStep()
+        {
+            return Input.GetKey(KeyCode.LeftControl) ? 10 : 1;
+        }
+
+        private void ToggleMenu(GameObject menu, GameObject other)
+        {
+            if (menu == null) return;
+            if (other != null) other.SetActive(false);
+            bool show = !menu.activeSelf;
+            menu.SetActive(show);
+            if (show) menu.transform.parent.SetAsLastSibling();
+        }
+
+        private void CloseMenus()
+        {
+            if (_categoryMenu != null) _categoryMenu.SetActive(false);
+            if (_tierMenu != null) _tierMenu.SetActive(false);
+        }
+
+        private static bool PointerInside(Component component)
+        {
+            if (component == null || !component.gameObject.activeInHierarchy) return false;
+            RectTransform rect = component.GetComponent<RectTransform>();
+            return rect != null && RectTransformUtility.RectangleContainsScreenPoint(rect, Input.mousePosition);
+        }
+
+        private static string CategoryLabel(RecipeCategory category)
+        {
+            return category == RecipeCategory.Ammunition ? "Ammo / Throwables" : category.ToString();
+        }
+
+        private static string TierLabel(ProgressionTier tier)
+        {
+            if (tier == ProgressionTier.All) return "All Tiers";
+            if (tier == ProgressionTier.BlackForest) return "Black Forest";
+            if (tier == ProgressionTier.DeepNorth) return "Deep North";
+            return tier.ToString();
         }
 
         private static void CopyNativeImage(Image source, Image target)
@@ -212,6 +447,33 @@ namespace DadsEZCrafting
             rect.pivot = new Vector2(0.5f, 1f);
             rect.offsetMin = new Vector2(left, -top - height);
             rect.offsetMax = new Vector2(right, -top);
+        }
+
+        private static void SetSlice(RectTransform rect, float minX, float maxX, float left, float right)
+        {
+            rect.anchorMin = new Vector2(minX, 0f);
+            rect.anchorMax = new Vector2(maxX, 1f);
+            rect.pivot = new Vector2(0.5f, 0.5f);
+            rect.offsetMin = new Vector2(left, 0f);
+            rect.offsetMax = new Vector2(right, 0f);
+            rect.localScale = Vector3.one;
+        }
+
+        private static void CopyRect(RectTransform source, RectTransform target)
+        {
+            target.anchorMin = source.anchorMin;
+            target.anchorMax = source.anchorMax;
+            target.pivot = source.pivot;
+            target.anchoredPosition = source.anchoredPosition;
+            target.sizeDelta = source.sizeDelta;
+            target.localScale = source.localScale;
+            target.localRotation = source.localRotation;
+        }
+
+        private sealed class DropdownChoice
+        {
+            internal string Label;
+            internal Action Select;
         }
 
         private void OnDestroy()

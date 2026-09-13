@@ -70,9 +70,20 @@ namespace DadsEZCrafting
             if (Category != RecipeCategory.Food && Sort >= RecipeSort.Health) Sort = RecipeSort.Native;
         }
 
+        internal static void SetCategory(RecipeCategory category)
+        {
+            Category = category;
+            if (Category != RecipeCategory.Food && Sort >= RecipeSort.Health) Sort = RecipeSort.Native;
+        }
+
         internal static void NextTier()
         {
             Tier = Tiers[((int)Tier + 1) % Tiers.Length];
+        }
+
+        internal static void SetTier(ProgressionTier tier)
+        {
+            Tier = tier;
         }
 
         internal static void NextSort()
