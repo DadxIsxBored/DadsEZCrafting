@@ -1,0 +1,7 @@
+bin/
+obj/
+Archive/
+.vs/
+*.user
+*.suo
+*.pdb

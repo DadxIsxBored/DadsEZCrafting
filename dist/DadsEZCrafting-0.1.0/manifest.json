@@ -1,0 +1,10 @@
+{
+  "name": "DadsEZCrafting",
+  "version_number": "0.1.0",
+  "website_url": "https://github.com/DadxIsxBored/DadsEZCrafting",
+  "description": "Native crafting-menu search, item categories, biome tiers, and food-stat sorting for Valheim 1.0.12.",
+  "dependencies": [
+    "denikson-BepInExPack_Valheim-5.4.2350"
+  ]
+}
+
